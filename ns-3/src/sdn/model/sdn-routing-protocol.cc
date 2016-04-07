@@ -413,8 +413,8 @@ void
 RoutingProtocol::ProcessHM (const sdn::MessageHeader &msg)
 {
   /*std::cout<<m_mainAddress.Get ()%256<<" RoutingProtocol::ProcessHM "
-      <<msg.GetHello ().ID.Get ()%256<<" m_lc_info size:"
-      <<m_lc_info.size ()<<std::endl;
+      <<msg.GetHello ().ID.Get ()%256<<" Speed:"
+      <<msg.GetHello ().GetVelocity ().x<<std::endl;
   */
   Ipv4Address ID = msg.GetHello ().ID;
   std::map<Ipv4Address, CarInfo>::iterator it = m_lc_info.find (ID);
@@ -425,7 +425,6 @@ RoutingProtocol::ProcessHM (const sdn::MessageHeader &msg)
       it->second.LastActive = Simulator::Now ();
       it->second.Position = msg.GetHello ().GetPosition ();
       it->second.Velocity = msg.GetHello ().GetVelocity ();
-      it->second.minhop = 0;
     }
   else
     {
@@ -436,6 +435,7 @@ RoutingProtocol::ProcessHM (const sdn::MessageHeader &msg)
       CI_temp.Velocity = msg.GetHello ().GetVelocity ();
       m_lc_info[ID] = CI_temp;
     }
+  //std::cout<<"V:"<<m_lc_info[ID].Velocity.x<<std::endl;
 }
 
 // \brief Build routing table according to Rm
@@ -1014,10 +1014,21 @@ RoutingProtocol::Do_Init_Compute ()
 {
   std::cout<<"Partition"<<std::endl;
   Partition ();
+
   std::cout<<"SetN_Init"<<std::endl;
   SetN_Init ();
+
   std::cout<<"OtherSet_Init"<<std::endl;
   OtherSet_Init ();
+
+  std::cout<<"Next:";
+  for (std::map<Ipv4Address, CarInfo>::const_iterator cit=m_lc_info.begin ();
+       cit!=m_lc_info.end (); ++cit)
+    {
+      std::cout<<cit->first.Get ()%256<<"->"<<cit->second.ID_of_minhop.Get ()%256<<","<<cit->second.minhop<<";";
+    }
+  std::cout<<std::endl;
+
   std::cout<<"SelectNode"<<std::endl;
   SelectNode ();
   std::cout<<"Do_Init_Compute DONE"<<std::endl;
@@ -1046,13 +1057,10 @@ RoutingProtocol::Partition ()
     {
       m_Sections.push_back (std::set<Ipv4Address> ());
     }
-  std::cout<<"CheckPonint1"<<std::endl;
   for (std::map<Ipv4Address, CarInfo>::const_iterator cit = m_lc_info.begin ();
        cit != m_lc_info.end(); ++cit)
     {
-      //std::cout<<"cit->first"<<cit->first.Get ()%256<<std::endl;
-      //std::cout<<GetArea (cit->second.Position)<<","<<numArea<<std::endl;
-      m_Sections[GetArea (cit->second.Position)].insert (cit->first);
+      m_Sections[GetArea (cit->second.GetPos ())].insert (cit->first);
     }
   std::cout<<m_lc_info.size ()<<std::endl;
   for (int i = 0; i < numArea; ++i)
@@ -1065,7 +1073,6 @@ RoutingProtocol::Partition ()
         }
       std::cout<<std::endl;
     }
-
 }
 
 void
@@ -1073,7 +1080,7 @@ RoutingProtocol::SetN_Init ()
 {
   int numArea = GetNumArea();
   for (std::set<Ipv4Address>::const_iterator cit = m_Sections[numArea-1].begin ();
-      cit != m_Sections[numArea-1].end (); ++cit)
+       cit != m_Sections[numArea-1].end (); ++cit)
     {
       m_lc_info[(*cit)].minhop = 1;
       m_lc_info[(*cit)].ID_of_minhop = Ipv4Address::GetZero ();
@@ -1084,9 +1091,15 @@ void
 RoutingProtocol::OtherSet_Init ()
 {
   int numArea = GetNumArea();
-  m_lc_info.clear ();
+  //m_lc_info.clear (); WTF?
   for (int area = numArea - 2; area >= 0; --area)
     {
+      for (std::set<Ipv4Address>::const_iterator cit = m_Sections[area].begin ();
+           cit != m_Sections[area].end (); ++cit)
+        {
+          m_lc_info[(*cit)].minhop = INFHOP;
+          m_lc_info[(*cit)].ID_of_minhop = Ipv4Address::GetZero ();
+        }
       m_lc_shorthop.clear();
       SortByDistance (area);
       CalcShortHopOfArea (area, area + 1);
@@ -1143,7 +1156,7 @@ void
 RoutingProtocol::UpdateMinHop (const Ipv4Address &ID)
 {
   uint32_t theminhop = INFHOP;
-  Ipv4Address IDofminhop;
+  Ipv4Address IDofminhop = Ipv4Address::GetZero ();
   for (std::list<ShortHop>::const_iterator cit = m_lc_shorthop[ID].begin ();
        cit != m_lc_shorthop[ID].end (); ++cit)
     {
@@ -1160,8 +1173,11 @@ RoutingProtocol::UpdateMinHop (const Ipv4Address &ID)
             }
         }
     }
-  m_lc_info[ID].ID_of_minhop = IDofminhop;
-  m_lc_info[ID].minhop = theminhop;
+  if (theminhop < m_lc_info[ID].minhop)
+    {
+      m_lc_info[ID].ID_of_minhop = IDofminhop;
+      m_lc_info[ID].minhop = theminhop;
+    }
 }
 
 void
@@ -1178,6 +1194,7 @@ RoutingProtocol::SelectNode ()
   uint32_t thezero = 0;
   Ipv4Address The_Car(thezero);
   uint32_t minhop_of_tc = INFHOP;
+  double best_pos = m_signal_range;
 
   //First Area
   for (std::set<Ipv4Address>::const_iterator cit = m_Sections[0].begin ();
@@ -1187,17 +1204,38 @@ RoutingProtocol::SelectNode ()
       if (temp_info.minhop < minhop_of_tc)
         {
           minhop_of_tc = temp_info.minhop;
+          best_pos = temp_info.Position.x;
           The_Car = *cit;
         }
+      else
+        if ((temp_info.minhop == minhop_of_tc)&&(temp_info.Position.x < best_pos)&&(minhop_of_tc < INFHOP))
+          {
+            best_pos = temp_info.Position.x;
+            The_Car = *cit;
+          }
     }
   m_theFirstCar = The_Car;
   Ipv4Address ZERO = Ipv4Address::GetZero ();
   std::cout<<"Chain ";
+  //TODO
+  if (The_Car != ZERO)
+    {
+      m_linkEstablished = true;
+    }
+  else
+    {
+      m_linkEstablished = false;
+    }
   while (The_Car != ZERO)
     {
-      std::cout<<The_Car.Get () % 256<<",";
+      double oldp = m_lc_info[The_Car].Position.x;
+      std::cout<<The_Car.Get () % 256<<"("<<oldp<<","<<m_lc_info[The_Car].minhop<<")";
       m_lc_info[The_Car].appointmentResult = FORWARDER;
       The_Car = m_lc_info[The_Car].ID_of_minhop;
+      if (The_Car != ZERO)
+        {
+          std::cout<<"<-"<<m_lc_info[The_Car].GetPos ().x - oldp<<"->";
+        }
     }
   std::cout<<std::endl;
 }
@@ -1292,22 +1330,23 @@ RoutingProtocol::SelectNewNodeInAreaZero ()
 void
 RoutingProtocol::Reschedule ()
 {
-  if (m_theFirstCar == Ipv4Address::GetZero ())
+  if (!m_linkEstablished)
     {
       if (m_apTimer.IsRunning ())
         {
           m_apTimer.Remove ();
         }
       m_apTimer.Schedule (m_minAPInterval);
+      std::cout<<"Reschedule:"<<m_minAPInterval.GetSeconds ()<<"s."<<std::endl;
     }
   else
     {
       double vx = m_lc_info[m_theFirstCar].Velocity.x;
       double px = m_lc_info[m_theFirstCar].GetPos ().x;
       double t2l;
-      if (vx == 0)
+      if (vx < 1e-7)
         {
-          t2l = 1;
+          t2l = 0.1;
         }
       else
         {
@@ -1317,7 +1356,12 @@ RoutingProtocol::Reschedule ()
         {
           m_apTimer.Remove ();
         }
+      if (t2l<1e-5)
+        {
+          t2l = 0.1;
+        }
       m_apTimer.Schedule(Seconds(t2l));
+      std::cout<<"Reschedule:"<<t2l<<"s."<<"p:"<<px<<",v:"<<vx<<std::endl;
     }
 }
 
@@ -1378,10 +1422,10 @@ RoutingProtocol::GetShortHop(const Ipv4Address& IDa, const Ipv4Address& IDb)
                        tpxb = pxb + vxb * sh.t;
           //t2bl minus t
           double const t2blmt = t2bl - sh.t;
-          if ((tpxa<tpxc)&&(tpxc<tpxb))
+          if ((tpxa<tpxc)&&(tpxc<tpxb)&&(tpxc-tpxa<m_signal_range)&&(tpxb-tpxc<m_signal_range))
             {
               if ((abs((tpxb + vxb*t2blmt)-(tpxc + vxc*t2blmt)) < m_signal_range)&&
-                  abs((tpxc + vxc*t2blmt)-(tpxa + vxa*t2blmt)) < m_signal_range)
+                  (abs((tpxc + vxc*t2blmt)-(tpxa + vxa*t2blmt)) < m_signal_range))
                 {
                   sh.IDa = IDa;
                   sh.IDb = IDb;
@@ -1421,6 +1465,7 @@ RoutingProtocol::ClearAllTables ()
 int
 RoutingProtocol::GetArea (Vector3D position) const
 {
+  //std::cout<<"P"<<position.x<<";";
   double &px = position.x;
   double road_length = m_road_length;
   //0.5r ~ r ~ r ~...~ r ~ r ~ last (if length_of_last<=0.5r, last={0.5r}; else last = {padding_area, 0.5r});

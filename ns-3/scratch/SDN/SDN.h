@@ -27,6 +27,7 @@
 
 #include "ns3/vanetmobility-helper.h"
 
+#include <unordered_set>
 
 using namespace ns3;
 
@@ -81,12 +82,14 @@ private:
 	uint32_t RX_Routing_Pkts, TX_Routing_Pkts;
 	uint32_t Rx_Data_Bytes, Tx_Data_Bytes;
 	uint32_t Rx_Data_Pkts, Tx_Data_Pkts;
+	uint32_t Unique_RX_Pkts;
 	uint32_t m_port;
 	ApplicationContainer m_source, m_sink, m_cars, m_controller;
 	Ptr<ns3::vanetmobility::VANETmobility> VMo;
 	void ReceiveDataPacket (Ptr<Socket> socket);
 	void SendDataPacket ();
 	void TXTrace (Ptr<const Packet> newpacket);
+	std::unordered_set<uint64_t> dup_det;
 };
 
 

@@ -14,6 +14,7 @@
 #include <dirent.h>//DIR*
 #include "SDN.h"
 
+
 NS_LOG_COMPONENT_DEFINE ("SDN");
 
 
@@ -35,7 +36,7 @@ VanetSim::VanetSim()
 	numPackets = 1;
 	interval = 0.1; // seconds
 	verbose = false;
-	mod = 0;
+	mod = 1;
 	pmod = 0;
 	duration = -1;
 	nodeNum = 0;
@@ -47,6 +48,7 @@ VanetSim::VanetSim()
 	Tx_Data_Pkts = 0;
 	Tx_Routing_Bytes = 0;
 	TX_Routing_Pkts = 0;
+	Unique_RX_Pkts = 0;
 	m_port = 65419;
 	homepath = getenv("HOME");
 	folder="SDN";
@@ -91,7 +93,7 @@ void VanetSim::ParseArguments(int argc, char *argv[])
 	cmd.AddValue ("range1", "Range for SCH", range1);
 	cmd.AddValue ("range2", "Range for CCH", range2);
 	cmd.AddValue ("verbose", "turn on all WifiNetDevice log components", verbose);
-	cmd.AddValue ("mod", "0=olsr(DEFAULT) 1=sdn", mod);
+	cmd.AddValue ("mod", "0=olsr 1=sdn(DEFAULT)", mod);
 	cmd.AddValue ("pmod", "0=Range(DEFAULT) 1=Other", pmod);
 	cmd.Parse (argc,argv);
 
@@ -330,7 +332,7 @@ void VanetSim::ConfigApp()
 
 	//sink
 	TypeId tid = TypeId::LookupByName ("ns3::UdpSocketFactory");
-	Ptr<Socket> sink = Socket::CreateSocket (m_nodes.Get(52), tid);//The Sink
+	Ptr<Socket> sink = Socket::CreateSocket (m_nodes.Get(nodeNum+2), tid);//The Sink
   //HearALL;
 	InetSocketAddress local = InetSocketAddress(Ipv4Address::GetZero (),m_port);
 	sink->Bind(local);
@@ -341,11 +343,17 @@ void VanetSim::ReceiveDataPacket(Ptr<Socket> socket)
 {
 	Ptr<Packet> packet;
 	while ((packet = socket->Recv()))
-	{
-		Rx_Data_Bytes += packet->GetSize();
-		Rx_Data_Pkts++;
-		std::cout<<".";
-	}
+	  {
+	    uint64_t uid = packet->GetUid ();
+	    if (dup_det.find (uid) == dup_det.end ())
+	      {
+	        Unique_RX_Pkts++;
+	        dup_det.insert (uid);
+	      }
+      Rx_Data_Bytes += packet->GetSize();
+      Rx_Data_Pkts++;
+      std::cout<<".";
+	  }
 }
 
 void VanetSim::SendDataPacket()
@@ -363,8 +371,9 @@ void VanetSim::ConfigTracing()
 
 void VanetSim::ProcessOutputs()
 {
-	std::cout<<Tx_Data_Pkts<<std::endl;
-	std::cout<<Rx_Data_Pkts<<std::endl;
+	std::cout<<"Tx_Data_Pkts"<<Tx_Data_Pkts<<std::endl;
+	std::cout<<"Rx_Data_Pkts"<<Rx_Data_Pkts<<std::endl;
+	std::cout<<"Unique_RX_Pkts"<<Unique_RX_Pkts<<std::endl;
 }
 
 void VanetSim::Run()
