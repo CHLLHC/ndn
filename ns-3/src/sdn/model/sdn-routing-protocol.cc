@@ -641,12 +641,11 @@ RoutingProtocol::RouteInput(Ptr<const Packet> p,
         {
           NS_LOG_LOGIC ("Forward broadcast");
           Ptr<Ipv4Route> broadcastRoute = Create<Ipv4Route> ();
-          broadcastRoute->SetDestination (dest);
           broadcastRoute->SetGateway (dest);//broadcast
           broadcastRoute->SetOutputDevice (m_ipv4->GetNetDevice (m_SCHinterface));
-          broadcastRoute->SetSource (sour);
-          //std::cout<<"call ucb"<<std::endl;
-          ucb (broadcastRoute, p, header);
+          Ipv4Header ipHeader = header;
+          ipHeader.SetSource (m_mainAddress); //To Prevent Brocast Storm
+          ucb (broadcastRoute, p, ipHeader);
         }
       return true;
 
@@ -991,7 +990,7 @@ RoutingProtocol::ComputeRoute ()
   std::cout<<"RemoveTimeOut"<<std::endl;
   RemoveTimeOut (); //Remove Stale Tuple
 
-  if (!m_linkEstablished)
+  if (1)//(!m_linkEstablished)
     {
       std::cout<<"Do_Init_Compute"<<std::endl;
       Do_Init_Compute ();
@@ -1037,10 +1036,8 @@ RoutingProtocol::Do_Init_Compute ()
 void
 RoutingProtocol::Do_Update ()
 {
-  std::cout<<"ShiftArea"<<std::endl;
-  ShiftArea ();
-  std::cout<<"AddNewToZero"<<std::endl;
-  AddNewToZero ();
+  std::cout<<"Partition"<<std::endl;
+  Partition ();
   std::cout<<"CalcSetZero"<<std::endl;
   CalcSetZero ();
   std::cout<<"SelectNewNodeInAreaZero"<<std::endl;
@@ -1217,7 +1214,6 @@ RoutingProtocol::SelectNode ()
   m_theFirstCar = The_Car;
   Ipv4Address ZERO = Ipv4Address::GetZero ();
   std::cout<<"Chain ";
-  //TODO
   if (The_Car != ZERO)
     {
       m_linkEstablished = true;
@@ -1228,7 +1224,7 @@ RoutingProtocol::SelectNode ()
     }
   while (The_Car != ZERO)
     {
-      double oldp = m_lc_info[The_Car].Position.x;
+      double oldp = m_lc_info[The_Car].GetPos ().x;
       std::cout<<The_Car.Get () % 256<<"("<<oldp<<","<<m_lc_info[The_Car].minhop<<")";
       m_lc_info[The_Car].appointmentResult = FORWARDER;
       The_Car = m_lc_info[The_Car].ID_of_minhop;
@@ -1251,32 +1247,10 @@ RoutingProtocol::ResetAppointmentResult ()
 }
 
 void
-RoutingProtocol::ShiftArea ()
-{
-  for (int i = GetNumArea () - 1; i>0; --i)
-    {
-      m_Sections[i] = m_Sections[i-1];
-    }
-  m_Sections[0].clear ();
-}
-
-void
-RoutingProtocol::AddNewToZero ()
-{
-  for (std::map<Ipv4Address, CarInfo>::const_iterator cit = m_lc_info.begin ();
-       cit != m_lc_info.end (); ++cit)
-    {
-      if (GetArea (cit->second.Position) == 0)
-        {
-          m_Sections[0].insert(cit->first);
-        }
-    }
-}
-
-void
 RoutingProtocol::CalcSetZero ()
 {
   m_lc_shorthop.clear();
+  SortByDistance (0);
   if (GetNumArea () > 1)
     CalcShortHopOfArea (0,1);
   if ((GetNumArea () == 3)&&(isPaddingExist ()))
@@ -1310,20 +1284,36 @@ RoutingProtocol::SelectNewNodeInAreaZero ()
           }
     }
 
-  if (m_lc_info[The_Car].ID_of_minhop == m_theFirstCar)
+  if (The_Car != Ipv4Address::GetZero ())
     {
-      m_theFirstCar = The_Car;
-      m_lc_info[The_Car].appointmentResult = FORWARDER;
+      if (m_lc_info[The_Car].ID_of_minhop == m_theFirstCar)
+        {
+          m_theFirstCar = The_Car;
+          m_lc_info[The_Car].appointmentResult = FORWARDER;
+          std::cout<<The_Car.Get () % 256<<"YES"<<std::endl;
+        }
+      else
+        {
+          ResetAppointmentResult ();
+          m_theFirstCar = The_Car;
+          std::cout<<"Chain ";
+          while (m_lc_info.find (The_Car) != m_lc_info.end ())
+            {
+              double oldp = m_lc_info[The_Car].GetPos ().x;
+              std::cout<<The_Car.Get () % 256<<"("<<oldp<<","<<m_lc_info[The_Car].minhop<<")";
+              m_lc_info[The_Car].appointmentResult = FORWARDER;
+              The_Car = m_lc_info[The_Car].ID_of_minhop;
+              if (The_Car != Ipv4Address::GetZero ())
+                {
+                  std::cout<<"<-"<<m_lc_info[The_Car].GetPos ().x - oldp<<"->";
+                }
+            }
+          std::cout<<std::endl;
+        }
     }
   else
     {
-      ResetAppointmentResult ();
-      m_theFirstCar = The_Car;
-      while (m_lc_info.find (The_Car) != m_lc_info.end ())
-        {
-          m_lc_info[The_Car].appointmentResult = FORWARDER;
-          The_Car = m_lc_info[The_Car].ID_of_minhop;
-        }
+      m_linkEstablished = false;
     }
 }
 
@@ -1346,7 +1336,7 @@ RoutingProtocol::Reschedule ()
       double t2l;
       if (vx < 1e-7)
         {
-          t2l = 0.1;
+          t2l = m_minAPInterval.GetSeconds ();
         }
       else
         {
@@ -1358,7 +1348,7 @@ RoutingProtocol::Reschedule ()
         }
       if (t2l<1e-5)
         {
-          t2l = 0.1;
+          t2l = m_minAPInterval.GetSeconds ();
         }
       m_apTimer.Schedule(Seconds(t2l));
       std::cout<<"Reschedule:"<<t2l<<"s."<<"p:"<<px<<",v:"<<vx<<std::endl;

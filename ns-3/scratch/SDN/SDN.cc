@@ -371,9 +371,9 @@ void VanetSim::ConfigTracing()
 
 void VanetSim::ProcessOutputs()
 {
-	std::cout<<"Tx_Data_Pkts"<<Tx_Data_Pkts<<std::endl;
-	std::cout<<"Rx_Data_Pkts"<<Rx_Data_Pkts<<std::endl;
-	std::cout<<"Unique_RX_Pkts"<<Unique_RX_Pkts<<std::endl;
+	std::cout<<"Tx_Data_Pkts:   "<<Tx_Data_Pkts<<std::endl;
+	std::cout<<"Rx_Data_Pkts:   "<<Rx_Data_Pkts<<std::endl;
+	std::cout<<"Unique_RX_Pkts: "<<Unique_RX_Pkts<<std::endl;
 }
 
 void VanetSim::Run()
